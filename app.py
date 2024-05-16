@@ -100,8 +100,13 @@ app.layout = dbc.Container(
                 dbc.Tab(label="Amsterdam", tab_id="Amsterdam"),
                 dbc.Tab(label="Eindhoven", tab_id="Eindhoven"),
                 dbc.Tab(label="Rotterdam", tab_id="Rotterdam"),
-                dbc.Tab(label="Nijmegen", tab_id="Nijmegen"),
                 dbc.Tab(label="Maastricht", tab_id="Maastricht"),
+                dbc.Tab(label="Utrecht", tab_id="Utrecht"),
+                dbc.Tab(label="Groningen", tab_id="Groningen"),
+                dbc.Tab(label="Leeuwarden", tab_id="Leeuwarden"),
+                dbc.Tab(label="Zwolle", tab_id="Zwolle"),
+                dbc.Tab(label="Arnhem", tab_id="Arnhem"),
+                dbc.Tab(label="Den Haag", tab_id="Den Haag"),
             ],
             id="tabs",
             active_tab="Eindhoven",
@@ -129,48 +134,6 @@ app.layout = dbc.Container(
 )
 
 
-def area_plot(scale, gm_name, area_name):
-    gdf = gpd.read_parquet(
-        f"results_normalised/filter0/{scale}/{gm_name}_{scale}.parquet"
-    )
-    labelnames = {"wijken": "wijknaam", "buurten": "buurtnaam"}
-    gdf = gdf[gdf[labelnames[scale]] == area_name]
-    inner_b, outer_b = ec.return_buildings(gdf.geometry.values[0])
-    amenities = ec.return_categorised_amenities(gdf.geometry.values[0])
-
-    figure = go.Figure()
-
-    figure.add_trace(outer_b.plot(color="silver", alpha=0.3))
-    figure.add_trace(inner_b.plot(color="silver", edgecolor="dimgrey", alpha=0.5))
-    figure.add_trace(gdf.boundary.plot(color="black"))
-    figure.add_trace(
-        amenities.plot(
-            column="L0_category",
-            markersize=10,
-            cmap="jet",
-            legend=True,
-            legend_kwds={"loc": "center left", "bbox_to_anchor": (1, 0.5)},
-        )
-    )
-
-    # fig, ax = plt.subplots()
-    # fig, ax = plt.subplots(figsize=(15, 15))
-    # outer_b.plot(ax=ax, color="silver", alpha=0.3)
-    # inner_b.plot(ax=ax, color="silver", edgecolor="dimgrey", alpha=0.5)
-    # gdf.boundary.plot(ax=ax, color="black")
-    # amenities.plot(
-    #     ax=ax,
-    #     column="L0_category",
-    #     markersize=10,
-    #     cmap="jet",
-    #     legend=True,
-    #     legend_kwds={"loc": "center left", "bbox_to_anchor": (1, 0.5)},
-    # )
-    # ax.set_axis_off()
-
-    return figure
-
-
 def get_choro(
     gdf, ent_value="shannon", scale_value="wijken", category_value="L0", norm=""
 ):
@@ -181,7 +144,8 @@ def get_choro(
         geojson=gdf.geometry,
         locations=gdf.index,
         color_continuous_scale="thermal",
-        # color_continuous_midpoint=0.5 if "_n" in value else 0.5,
+        # set scale range from 0 to 6
+        range_color=(0, 6) if "_n" not in norm else (0, 1),
         color=f"{category_value}_{ent_value}{norm}",
         hover_data={labelnames[scale_value]: True, codenames[scale_value]: True},
     )
@@ -214,7 +178,7 @@ def toggle_offcanvas(clickData, gm_name, scale, filterlevel, is_open):
         codedict = {"wijken": "wijkcode", "buurten": "buurtcode"}
 
         # load all cbs data
-        cbs = gpd.read_parquet("wijkenbuurten_2023_clean.parquet")
+        cbs = gpd.read_parquet("data/wijkenbuurten_2023_clean.parquet")
         cbs = cbs[cbs[codedict[scale]] == area_code]
 
         # collect statistics
@@ -256,7 +220,7 @@ def toggle_offcanvas(clickData, gm_name, scale, filterlevel, is_open):
         )
 
         area = gpd.read_parquet(
-            f"results/filter{filterlevel}/{scale}/{gm_name}_{scale}.parquet"
+            f"results/filter{filterlevel}/{scale}/{gm_name}_{scale}_{filterlevel}.parquet"
         )
         area = area[area[areadict[scale]] == area_name]
 
@@ -299,10 +263,20 @@ def render_tab_content(active_tab, data):
             return dcc.Graph(figure=data["Eindhoven"], id="choro")
         elif active_tab == "Rotterdam":
             return dcc.Graph(figure=data["Rotterdam"], id="choro")
-        elif active_tab == "Nijmegen":
-            return dcc.Graph(figure=data["Nijmegen"], id="choro")
         elif active_tab == "Maastricht":
             return dcc.Graph(figure=data["Maastricht"], id="choro")
+        elif active_tab == "Utrecht":
+            return dcc.Graph(figure=data["Utrecht"], id="choro")
+        elif active_tab == "Groningen":
+            return dcc.Graph(figure=data["Groningen"], id="choro")
+        elif active_tab == "Leeuwarden":
+            return dcc.Graph(figure=data["Leeuwarden"], id="choro")
+        elif active_tab == "Zwolle":
+            return dcc.Graph(figure=data["Zwolle"], id="choro")
+        elif active_tab == "Arnhem":
+            return dcc.Graph(figure=data["Arnhem"], id="choro")
+        elif active_tab == "Den Haag":
+            return dcc.Graph(figure=data["Den Haag"], id="choro")
     return "No tab selected"
 
 
@@ -324,7 +298,7 @@ def generate_graphs(n, ent_value, filter_value, scale_value, category_value, nor
 
     ams = get_choro(
         gpd.read_parquet(
-            f"results_normalised/filter{filter_value}/{scale_value}/amsterdam_{scale_value}.parquet"
+            f"results/filter{filter_value}/{scale_value}/Amsterdam_{scale_value}_{filter_value}.parquet"
         ),
         ent_value,
         scale_value,
@@ -333,7 +307,7 @@ def generate_graphs(n, ent_value, filter_value, scale_value, category_value, nor
     )
     ehv = get_choro(
         gpd.read_parquet(
-            f"results_normalised/filter{filter_value}/{scale_value}/eindhoven_{scale_value}.parquet"
+            f"results/filter{filter_value}/{scale_value}/Eindhoven_{scale_value}_{filter_value}.parquet"
         ),
         ent_value,
         scale_value,
@@ -342,16 +316,7 @@ def generate_graphs(n, ent_value, filter_value, scale_value, category_value, nor
     )
     rot = get_choro(
         gpd.read_parquet(
-            f"results_normalised/filter{filter_value}/{scale_value}/rotterdam_{scale_value}.parquet"
-        ),
-        ent_value,
-        scale_value,
-        category_value,
-        norm,
-    )
-    nij = get_choro(
-        gpd.read_parquet(
-            f"results_normalised/filter{filter_value}/{scale_value}/nijmegen_{scale_value}.parquet"
+            f"results/filter{filter_value}/{scale_value}/Rotterdam_{scale_value}_{filter_value}.parquet"
         ),
         ent_value,
         scale_value,
@@ -360,7 +325,61 @@ def generate_graphs(n, ent_value, filter_value, scale_value, category_value, nor
     )
     maa = get_choro(
         gpd.read_parquet(
-            f"results_normalised/filter{filter_value}/{scale_value}/maastricht_{scale_value}.parquet"
+            f"results/filter{filter_value}/{scale_value}/Maastricht_{scale_value}_{filter_value}.parquet"
+        ),
+        ent_value,
+        scale_value,
+        category_value,
+        norm,
+    )
+    dhg = get_choro(
+        gpd.read_parquet(
+            f"results/filter{filter_value}/{scale_value}/'s-Gravenhage_{scale_value}_{filter_value}.parquet"
+        ),
+        ent_value,
+        scale_value,
+        category_value,
+        norm,
+    )
+    arn = get_choro(
+        gpd.read_parquet(
+            f"results/filter{filter_value}/{scale_value}/Arnhem_{scale_value}_{filter_value}.parquet"
+        ),
+        ent_value,
+        scale_value,
+        category_value,
+        norm,
+    )
+    zwl = get_choro(
+        gpd.read_parquet(
+            f"results/filter{filter_value}/{scale_value}/Zwolle_{scale_value}_{filter_value}.parquet"
+        ),
+        ent_value,
+        scale_value,
+        category_value,
+        norm,
+    )
+    lwd = get_choro(
+        gpd.read_parquet(
+            f"results/filter{filter_value}/{scale_value}/Leeuwarden_{scale_value}_{filter_value}.parquet"
+        ),
+        ent_value,
+        scale_value,
+        category_value,
+        norm,
+    )
+    grn = get_choro(
+        gpd.read_parquet(
+            f"results/filter{filter_value}/{scale_value}/Groningen_{scale_value}_{filter_value}.parquet"
+        ),
+        ent_value,
+        scale_value,
+        category_value,
+        norm,
+    )
+    utr = get_choro(
+        gpd.read_parquet(
+            f"results/filter{filter_value}/{scale_value}/Utrecht_{scale_value}_{filter_value}.parquet"
         ),
         ent_value,
         scale_value,
@@ -373,8 +392,13 @@ def generate_graphs(n, ent_value, filter_value, scale_value, category_value, nor
         "Amsterdam": ams,
         "Eindhoven": ehv,
         "Rotterdam": rot,
-        "Nijmegen": nij,
         "Maastricht": maa,
+        "Den Haag": dhg,
+        "Arnhem": arn,
+        "Zwolle": zwl,
+        "Leeuwarden": lwd,
+        "Groningen": grn,
+        "Utrecht": utr,
     }
 
 
@@ -394,48 +418,83 @@ def generate_corr_matrices(n, filter_value, scale_value, category_value, norm):
     """
 
     ams = gpd.read_parquet(
-        f"results_normalised/filter{filter_value}/{scale_value}/amsterdam_{scale_value}.parquet"
+        f"results/filter{filter_value}/{scale_value}/Amsterdam_{scale_value}_{filter_value}.parquet"
     )
     ehv = gpd.read_parquet(
-        f"results_normalised/filter{filter_value}/{scale_value}/eindhoven_{scale_value}.parquet"
+        f"results/filter{filter_value}/{scale_value}/Eindhoven_{scale_value}_{filter_value}.parquet"
     )
     rot = gpd.read_parquet(
-        f"results_normalised/filter{filter_value}/{scale_value}/rotterdam_{scale_value}.parquet"
-    )
-    nij = gpd.read_parquet(
-        f"results_normalised/filter{filter_value}/{scale_value}/nijmegen_{scale_value}.parquet"
+        f"results/filter{filter_value}/{scale_value}/Rotterdam_{scale_value}_{filter_value}.parquet"
     )
     maa = gpd.read_parquet(
-        f"results_normalised/filter{filter_value}/{scale_value}/maastricht_{scale_value}.parquet"
+        f"results/filter{filter_value}/{scale_value}/Maastricht_{scale_value}_{filter_value}.parquet"
+    )
+    dhg = gpd.read_parquet(
+        f"results/filter{filter_value}/{scale_value}/'s-Gravenhage_{scale_value}_{filter_value}.parquet"
+    )
+    arn = gpd.read_parquet(
+        f"results/filter{filter_value}/{scale_value}/Arnhem_{scale_value}_{filter_value}.parquet"
+    )
+    zwl = gpd.read_parquet(
+        f"results/filter{filter_value}/{scale_value}/Zwolle_{scale_value}_{filter_value}.parquet"
+    )
+    lwd = gpd.read_parquet(
+        f"results/filter{filter_value}/{scale_value}/Leeuwarden_{scale_value}_{filter_value}.parquet"
+    )
+    grn = gpd.read_parquet(
+        f"results/filter{filter_value}/{scale_value}/Groningen_{scale_value}_{filter_value}.parquet"
+    )
+    utr = gpd.read_parquet(
+        f"results/filter{filter_value}/{scale_value}/Utrecht_{scale_value}_{filter_value}.parquet"
     )
 
     ams_corr = ams.filter(regex=f"{category_value}_.*_n$").corr()
     ehv_corr = ehv.filter(regex=f"{category_value}_.*_n$").corr()
     rot_corr = rot.filter(regex=f"{category_value}_.*_n$").corr()
-    nij_corr = nij.filter(regex=f"{category_value}_.*_n$").corr()
     maa_corr = maa.filter(regex=f"{category_value}_.*_n$").corr()
+    dhg_corr = dhg.filter(regex=f"{category_value}_.*_n$").corr()
+    arn_corr = arn.filter(regex=f"{category_value}_.*_n$").corr()
+    zwl_corr = zwl.filter(regex=f"{category_value}_.*_n$").corr()
+    lwd_corr = lwd.filter(regex=f"{category_value}_.*_n$").corr()
+    grn_corr = grn.filter(regex=f"{category_value}_.*_n$").corr()
+    utr_corr = utr.filter(regex=f"{category_value}_.*_n$").corr()
 
     # set the diagonal to NaN
     np.fill_diagonal(ams_corr.values, np.nan)
     np.fill_diagonal(ehv_corr.values, np.nan)
     np.fill_diagonal(rot_corr.values, np.nan)
-    np.fill_diagonal(nij_corr.values, np.nan)
     np.fill_diagonal(maa_corr.values, np.nan)
+    np.fill_diagonal(dhg_corr.values, np.nan)
+    np.fill_diagonal(arn_corr.values, np.nan)
+    np.fill_diagonal(zwl_corr.values, np.nan)
+    np.fill_diagonal(lwd_corr.values, np.nan)
+    np.fill_diagonal(grn_corr.values, np.nan)
+    np.fill_diagonal(utr_corr.values, np.nan)
 
     # make a px graph of the correlation matrix
     ams_corr = px.imshow(ams_corr)
     ehv_corr = px.imshow(ehv_corr)
     rot_corr = px.imshow(rot_corr)
-    nij_corr = px.imshow(nij_corr)
     maa_corr = px.imshow(maa_corr)
+    dhg_corr = px.imshow(dhg_corr)
+    arn_corr = px.imshow(arn_corr)
+    zwl_corr = px.imshow(zwl_corr)
+    lwd_corr = px.imshow(lwd_corr)
+    grn_corr = px.imshow(grn_corr)
+    utr_corr = px.imshow(utr_corr)
 
     # save figures in a dictionary for sending to the dcc.Store
     return {
         "Amsterdam": ams_corr,
         "Eindhoven": ehv_corr,
         "Rotterdam": rot_corr,
-        "Nijmegen": nij_corr,
         "Maastricht": maa_corr,
+        "Den Haag": dhg_corr,
+        "Arnhem": arn_corr,
+        "Zwolle": zwl_corr,
+        "Leeuwarden": lwd_corr,
+        "Groningen": grn_corr,
+        "Utrecht": utr_corr,
     }
 
 
@@ -460,10 +519,21 @@ def render_correlation_matrices(active_tab, data):
             return dcc.Graph(figure=data["Eindhoven"])
         elif active_tab == "Rotterdam":
             return dcc.Graph(figure=data["Rotterdam"])
-        elif active_tab == "Nijmegen":
-            return dcc.Graph(figure=data["Nijmegen"])
         elif active_tab == "Maastricht":
             return dcc.Graph(figure=data["Maastricht"])
+        elif active_tab == "Utrecht":
+            return dcc.Graph(figure=data["Utrecht"])
+        elif active_tab == "Groningen":
+            return dcc.Graph(figure=data["Groningen"])
+        elif active_tab == "Leeuwarden":
+            return dcc.Graph(figure=data["Leeuwarden"])
+        elif active_tab == "Zwolle":
+            return dcc.Graph(figure=data["Zwolle"])
+        elif active_tab == "Arnhem":
+            return dcc.Graph(figure=data["Arnhem"])
+        elif active_tab == "Den Haag":
+            return dcc.Graph(figure=data["Den Haag"])
+
     return "No tab selected"
 
 
