@@ -12,9 +12,6 @@ __pycache__/
 data/cbs_shp
 data/*.txt
 
-# Results (might be changed later)
-results
-
 ##############################################################
 
 # C extensions
