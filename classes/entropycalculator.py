@@ -18,7 +18,7 @@ api = osmapi.OSM_API()
 # ------- CONSTANTS -------#
 
 # categorisation
-CATEGORISATION = pd.read_excel("categorisation.xlsx")
+CATEGORISATION = pd.read_excel("data/categorisation.xlsx")
 
 # cleaning
 COLS_TO_KEEP = ["type", "tags", "geometry"]
