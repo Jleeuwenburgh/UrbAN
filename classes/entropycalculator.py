@@ -1,4 +1,5 @@
 import pandas as pd
+import geopandas as gpd
 import shapely
 import shapely.geometry
 from spatialentropy import altieri_entropy, leibovici_entropy
@@ -66,6 +67,57 @@ L1_BLACKLIST = {}
 #     "Public service": ["PS_Other"],
 # }
 # ---------------------------------#
+
+
+def getfilter(filter_i):
+    assert filter_i in [0, 1, 2], "Filter number must be 0, 1 or 2"
+    # ----------- FILTER 0 ------------#
+    if filter_i == 0:
+        L0_BLACKLIST = [
+            "Uncategorised",
+        ]
+        L1_BLACKLIST = {}
+    # ---------------------------------#
+
+    # ----------- FILTER 1 ------------#
+    if filter_i == 1:
+        L0_BLACKLIST = [
+            "Uncategorised",
+            "Private transportation",
+            "Facilities",
+            "Waste management",
+        ]
+        L1_BLACKLIST = {
+            "Healthcare": ["Healthcare_Other"],
+            "Shopping": ["Shopping_Other"],
+            "Public service": ["PS_Other"],
+        }
+    # ---------------------------------#
+
+    # ----------- FILTER 2 ------------#
+    if filter_i == 2:
+        L0_BLACKLIST = [
+            "Uncategorised",
+            "Private transportation",
+            "Facilities",
+            "Waste management",
+            "Financial",
+        ]
+        L1_BLACKLIST = {
+            "Healthcare": ["Healthcare_Other"],
+            "Entertainment, arts and culture": ["EAC_Other"],
+            "Shopping": [
+                "Shopping_Other",
+                "Clothing and accessoires",
+                "Crafts",
+                "House and interior",
+                "Media, appliances and hardware",
+                "Mobility",
+            ],
+            "Public service": ["PS_Other"],
+        }
+    # ---------------------------------#
+    return (L0_BLACKLIST, L1_BLACKLIST)
 
 
 def find_primary_tag(x):
@@ -173,7 +225,7 @@ def _get_shannon_entropy(labels, base=2):
     return entropy(probs, base=base)
 
 
-def calculate_entropies(area):
+def calculate_entropies_fromapi(area):
     assert isinstance(
         area,
         (shapely.geometry.multipolygon.MultiPolygon, shapely.geometry.polygon.Polygon),
@@ -240,7 +292,69 @@ def calculate_entropies(area):
     ]
 
 
-def calculate_entropies_no_leibo(area):
+def calculate_entropies(area, gm_name, entropy_types, filter_i):
+
+    legal_entropy_types = [
+        "L0_shannon",
+        "L1_shannon",
+        "L0_altieri",
+        "L1_altieri",
+        "L0_leibovici",
+        "L1_leibovici",
+    ]
+    for et in entropy_types:
+        assert (
+            et in legal_entropy_types
+        ), f"Entropy type {et} is not a legal entropy type"
+
+    # get filters
+    L0_BLACKLIST, L1_BLACKLIST = getfilter(filter_i)
+
+    # gather amenities
+    amenity_gdf = gpd.read_parquet(f"data/gm_amenities/amenities_{gm_name}.parquet")
+    amenity_gdf = amenity_gdf[amenity_gdf.within(area)]
+
+    if amenity_gdf.empty:
+        return [0] * len(entropy_types)
+
+    # apply filters
+    amenity_gdf = amenity_gdf[~amenity_gdf.L0_category.isin(L0_BLACKLIST)]
+    if L1_BLACKLIST:
+        for key, value in L1_BLACKLIST.items():
+            amenity_gdf = amenity_gdf[
+                ~(
+                    (amenity_gdf.L0_category == key)
+                    & (amenity_gdf.L1_category.isin(value))
+                )
+            ]
+
+    if amenity_gdf.empty:
+        return [0] * len(entropy_types)
+
+    L0 = amenity_gdf.loc[:, "L0_category"].values
+    L1 = amenity_gdf.loc[:, "L1_category"].values
+
+    # points = amenity_gdf.points_tup.values
+    points = [[point.x, point.y] for point in amenity_gdf.geometry]
+    calculated_entropies = []
+
+    for entropy_type in entropy_types:
+        cat, enttype = entropy_type.split("_")
+        if enttype == "shannon":
+            calculated_entropies.append(_get_shannon_entropy(eval(cat), base=2))
+        elif enttype == "altieri":
+            calculated_entropies.append(
+                altieri_entropy(points, eval(cat), base=2).entropy
+            )
+        elif enttype == "leibovici":
+            calculated_entropies.append(
+                leibovici_entropy(points, eval(cat), base=2).entropy
+            )
+
+    return calculated_entropies
+
+
+def calculate_entropies_fromapi_no_leibo(area):
     assert isinstance(
         area,
         (shapely.geometry.multipolygon.MultiPolygon, shapely.geometry.polygon.Polygon),
