@@ -12,10 +12,12 @@ import dash
 import dash_bootstrap_components as dbc
 import plotly.graph_objects as go
 import geopandas as gpd
+import pandas as pd
 import numpy as np
+import os
 from shapely import centroid
 import plotly_express as px
-from dash import Input, Output, dcc, html, State
+from dash import Input, Output, dcc, html, State, dash_table
 from classes.areaplotter import plot_area
 
 import classes.entropycalculator as ec
@@ -26,7 +28,6 @@ import classes.entropycalculator as ec
 # also demonstrates use of a `dcc.Store` component to cache graph data so that
 # if the data generating process is expensive, switching tabs is still quick."""
 EXPLAINER = """"""
-
 
 app = dash.Dash(external_stylesheets=[dbc.themes.LUX])
 
@@ -134,6 +135,28 @@ app.layout = dbc.Container(
 )
 
 
+def get_similar_areas(gdf, area, n=5):
+    agecols = list(gdf.filter(regex="P_.*_JR$").columns)
+    features = ["BEV_DICHTH", "L0_altieri", "L1_altieri"]
+    gdf = gdf[gdf["BEV_DICHTH"] > 0]  # remove rows with 0 population density
+    # normalize features
+    gdf[features] = gdf[features].apply(lambda x: (x - x.min()) / (x.max() - x.min()))
+    gdf[agecols] = gdf[agecols].apply(lambda x: x / 100)
+
+    area = gdf[gdf.index == area.index[0]]
+
+    features = features + agecols
+
+    # calculate the distance between the sample and all other wijken, don't use the index
+    gdf["distance"] = np.linalg.norm(gdf[features] - area[features].values[0], axis=1)
+
+    # sort by distance ascending
+    similarities = gdf.sort_values("distance").reset_index(drop=True)
+    # similarities = similarities[~similarities['gemeentenaam'].isin(area['gemeentenaam'])]
+
+    return similarities[1 : n + 1][["gemeentenaam", "wijknaam"]]
+
+
 def get_choro(
     gdf, ent_value="shannon", scale_value="wijken", category_value="L0", norm=""
 ):
@@ -145,7 +168,7 @@ def get_choro(
         locations=gdf.index,
         color_continuous_scale="thermal",
         # set scale range from 0 to 6
-        range_color=(0, 6) if "_n" not in norm else (0, 1),
+        range_color=(0, 8) if "_n" not in norm else (0, 1),
         color=f"{category_value}_{ent_value}{norm}",
         hover_data={labelnames[scale_value]: True, codenames[scale_value]: True},
     )
@@ -170,7 +193,7 @@ def get_choro(
 )
 def toggle_offcanvas(clickData, gm_name, scale, filterlevel, is_open):
     if clickData:
-        print(clickData)
+        # print(clickData)
 
         area_code = clickData["points"][0]["customdata"][1]
         area_name = clickData["points"][0]["customdata"][0].replace("/", "_")
@@ -178,20 +201,35 @@ def toggle_offcanvas(clickData, gm_name, scale, filterlevel, is_open):
         codedict = {"wijken": "wijkcode", "buurten": "buurtcode"}
 
         # load all cbs data
-        cbs = gpd.read_parquet("data/wijkenbuurten_2023_clean.parquet")
-        cbs = cbs[cbs[codedict[scale]] == area_code]
-
+        # cbs = gpd.read_parquet("data/wijkenbuurten_2023_clean.parquet")
+        # cbs = cbs[cbs[codedict[scale]] == area_code]
+        gdf = gpd.read_parquet(
+            f"results/filter{filterlevel}/{scale}/{gm_name}_{scale}_{filterlevel}.parquet"
+        )
+        area = gdf[gdf[areadict[scale]] == area_name]
         # collect statistics
-        aantal_inwoners = int(cbs["aantal_inwoners"].sum())
-        aantal_mannen = int(cbs["mannen"].sum())
-        aantal_vrouwen = int(cbs["vrouwen"].sum())
+        aantal_inwoners = area["AANT_INW"]
+        agecols = area.filter(regex="P_.*_JR$").columns
+        area.loc[:, agecols] = area.loc[:, agecols].apply(
+            lambda x: np.ceil(aantal_inwoners * x / 100)
+        )
+
+        cols_gebnl = area.filter(regex="P_GEBNL.*").columns
+        cols_gebbl = area.filter(regex="P_GEBBL.*").columns
+        # cols_geb = cols_gebnl + cols_gebbl
+        area.loc[:, cols_gebnl] = area.loc[:, cols_gebnl].apply(
+            lambda x: np.ceil(aantal_inwoners * x / 100)
+        )
+        area.loc[:, cols_gebbl] = area.loc[:, cols_gebbl].apply(
+            lambda x: np.ceil(aantal_inwoners * x / 100)
+        )
 
         # make relative bar plot of the amount of mannen en vrouwen
         mv_bar = go.Figure()
         mv_bar.add_trace(
             go.Bar(
                 y=["Mannen / Vrouwen"],
-                x=[aantal_mannen],
+                x=area["AANT_MAN"],
                 name="Mannen",
                 orientation="h",
                 marker=dict(
@@ -203,7 +241,7 @@ def toggle_offcanvas(clickData, gm_name, scale, filterlevel, is_open):
         mv_bar.add_trace(
             go.Bar(
                 y=["Mannen / Vrouwen"],
-                x=[aantal_vrouwen],
+                x=area["AANT_VROUW"],
                 name="Vrouwen",
                 orientation="h",
                 marker=dict(
@@ -212,10 +250,37 @@ def toggle_offcanvas(clickData, gm_name, scale, filterlevel, is_open):
                 ),
             )
         )
+        for col in agecols:
+            mv_bar.add_trace(
+                go.Bar(
+                    y=["leeftijd"],
+                    x=area[col],
+                    name=col,
+                    orientation="h",
+                )
+            )
+        for col in cols_gebnl:
+            mv_bar.add_trace(
+                go.Bar(
+                    y=["geboren"],
+                    x=area[col],
+                    name=col,
+                    orientation="h",
+                )
+            )
+        for col in cols_gebbl:
+            mv_bar.add_trace(
+                go.Bar(
+                    y=["geboren"],
+                    x=area[col],
+                    name=col,
+                    orientation="h",
+                )
+            )
 
         mv_bar.update_layout(
             barmode="relative",
-            height=250,
+            # height=250,
             xaxis_autorange=True,
         )
 
@@ -230,12 +295,35 @@ def toggle_offcanvas(clickData, gm_name, scale, filterlevel, is_open):
         counts.category = counts.category.str.replace("L0_c_", "")
         amenity_bar = px.bar(counts, x="count", y="category", orientation="h")
 
+        gdf_tot = None
+        for file in os.listdir(f"results/filter{filterlevel}/{scale}"):
+            if file.endswith(".parquet"):
+                if gdf_tot is not None:
+                    gdf_tot = pd.concat(
+                        [
+                            gdf_tot,
+                            gpd.read_parquet(
+                                f"results/filter{filterlevel}/{scale}/{file}"
+                            ),
+                        ]
+                    )
+                else:
+                    gdf_tot = gpd.read_parquet(
+                        f"results/filter{filterlevel}/{scale}/{file}"
+                    )
+        area = gdf_tot[gdf_tot[codedict[scale]] == area_code]
+        similarities = get_similar_areas(gdf_tot, area, 5)
+
         return (
             not is_open,
             # html.Img(src=app.get_asset_url("area_plot.png"), style={"width": "100%"}),
             [
+                html.H4(f"Amenity distribution"),
                 dcc.Graph(figure=amenity_bar),
+                html.H4(f"Population distribution"),
                 dcc.Graph(figure=mv_bar),
+                html.H4(f"Most similar areas"),
+                dash_table.DataTable(similarities.to_dict("records")),
             ],
             f"{gm_name} - {clickData['points'][0]['customdata'][0]}",
         )
@@ -472,16 +560,16 @@ def generate_corr_matrices(n, filter_value, scale_value, category_value, norm):
     np.fill_diagonal(utr_corr.values, np.nan)
 
     # make a px graph of the correlation matrix
-    ams_corr = px.imshow(ams_corr)
-    ehv_corr = px.imshow(ehv_corr)
-    rot_corr = px.imshow(rot_corr)
-    maa_corr = px.imshow(maa_corr)
-    dhg_corr = px.imshow(dhg_corr)
-    arn_corr = px.imshow(arn_corr)
-    zwl_corr = px.imshow(zwl_corr)
-    lwd_corr = px.imshow(lwd_corr)
-    grn_corr = px.imshow(grn_corr)
-    utr_corr = px.imshow(utr_corr)
+    ams_corr = px.imshow(ams_corr, range_color=(0, 1))
+    ehv_corr = px.imshow(ehv_corr, range_color=(0, 1))
+    rot_corr = px.imshow(rot_corr, range_color=(0, 1))
+    maa_corr = px.imshow(maa_corr, range_color=(0, 1))
+    dhg_corr = px.imshow(dhg_corr, range_color=(0, 1))
+    arn_corr = px.imshow(arn_corr, range_color=(0, 1))
+    zwl_corr = px.imshow(zwl_corr, range_color=(0, 1))
+    lwd_corr = px.imshow(lwd_corr, range_color=(0, 1))
+    grn_corr = px.imshow(grn_corr, range_color=(0, 1))
+    utr_corr = px.imshow(utr_corr, range_color=(0, 1))
 
     # save figures in a dictionary for sending to the dcc.Store
     return {
