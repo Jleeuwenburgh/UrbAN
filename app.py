@@ -19,6 +19,9 @@ from shapely import centroid
 import plotly_express as px
 from dash import Input, Output, dcc, html, State, dash_table
 from classes.areaplotter import plot_area
+from pysal.explore import esda  # Exploratory Spatial analytics
+from pysal.lib import weights  # Spatial weights
+from splot import esda as esdaplot
 
 import classes.entropycalculator as ec
 
@@ -40,6 +43,15 @@ app.layout = dbc.Container(
             color="primary",
             id="button",
             className="mb-3",
+        ),
+        dbc.RadioItems(
+            options=[
+                {"label": "Entropy", "value": "entropy"},
+                {"label": "Autocorrelation", "value": "autocorrelation"},
+            ],
+            value="autocorrelation",
+            id="mode_selector",
+            inline=True,
         ),
         dbc.RadioItems(
             options=[
@@ -170,6 +182,45 @@ def get_choro(
         # set scale range from 0 to 6
         range_color=(0, 8) if "_n" not in norm else (0, 1),
         color=f"{category_value}_{ent_value}{norm}",
+        hover_data={labelnames[scale_value]: True, codenames[scale_value]: True},
+    )
+    fig.update_geos(fitbounds="locations", visible=False)
+    fig.update_layout(margin={"r": 0, "t": 0, "l": 0, "b": 0}, autosize=True)
+    return fig
+
+
+def get_choro_autocor(
+    gdf, ent_value="shannon", scale_value="wijken", category_value="L0", norm=""
+):
+    labelnames = {"wijken": "wijknaam", "buurten": "buurtnaam"}
+    codenames = {"wijken": "wijkcode", "buurten": "buurtcode"}
+    col = f"{category_value}_{ent_value}{norm}"
+
+    gdf = gdf.dropna(subset=[col])
+    gdf = gdf.reset_index(drop=True)
+    w = weights.contiguity.Queen.from_dataframe(gdf, use_index=False)
+    w.transform = "R"
+
+    lisa = esda.Moran_Local(gdf[col], w)
+
+    gdf.loc[:, "lisa"] = lisa.q
+
+    lisadict = {1: "HH", 2: "LH", 3: "LL", 4: "HL"}
+    gdf.loc[:, "lisa"] = gdf.loc[:, "lisa"].map(lisadict)
+
+    fig = px.choropleth(
+        gdf,
+        geojson=gdf.geometry,
+        locations=gdf.index,
+        color="lisa",
+        color_discrete_map={
+            "HH": "#E45756",
+            "LH": "#72B7B2",
+            "LL": "#4C78A8",
+            "HL": "#F58518",
+        },
+        color_discrete_sequence=["#E45756", "#72B7B2", "#4C78A8", "#F58518"],
+        # color_continuous_scale=["#E45756", "#72B7B2", "#4C78A8", "#F58518"],
         hover_data={labelnames[scale_value]: True, codenames[scale_value]: True},
     )
     fig.update_geos(fitbounds="locations", visible=False)
@@ -377,103 +428,199 @@ def render_tab_content(active_tab, data):
         Input("scale_selector", "value"),
         Input("category_selector", "value"),
         Input("normalisation_selector", "value"),
+        Input("mode_selector", "value"),
     ],
 )
-def generate_graphs(n, ent_value, filter_value, scale_value, category_value, norm):
+def generate_graphs(
+    n, ent_value, filter_value, scale_value, category_value, norm, mode
+):
     """
     This callback generates three simple graphs from random data.
     """
 
-    ams = get_choro(
-        gpd.read_parquet(
-            f"results/filter{filter_value}/{scale_value}/Amsterdam_{scale_value}_{filter_value}.parquet"
-        ),
-        ent_value,
-        scale_value,
-        category_value,
-        norm,
-    )
-    ehv = get_choro(
-        gpd.read_parquet(
-            f"results/filter{filter_value}/{scale_value}/Eindhoven_{scale_value}_{filter_value}.parquet"
-        ),
-        ent_value,
-        scale_value,
-        category_value,
-        norm,
-    )
-    rot = get_choro(
-        gpd.read_parquet(
-            f"results/filter{filter_value}/{scale_value}/Rotterdam_{scale_value}_{filter_value}.parquet"
-        ),
-        ent_value,
-        scale_value,
-        category_value,
-        norm,
-    )
-    maa = get_choro(
-        gpd.read_parquet(
-            f"results/filter{filter_value}/{scale_value}/Maastricht_{scale_value}_{filter_value}.parquet"
-        ),
-        ent_value,
-        scale_value,
-        category_value,
-        norm,
-    )
-    dhg = get_choro(
-        gpd.read_parquet(
-            f"results/filter{filter_value}/{scale_value}/'s-Gravenhage_{scale_value}_{filter_value}.parquet"
-        ),
-        ent_value,
-        scale_value,
-        category_value,
-        norm,
-    )
-    arn = get_choro(
-        gpd.read_parquet(
-            f"results/filter{filter_value}/{scale_value}/Arnhem_{scale_value}_{filter_value}.parquet"
-        ),
-        ent_value,
-        scale_value,
-        category_value,
-        norm,
-    )
-    zwl = get_choro(
-        gpd.read_parquet(
-            f"results/filter{filter_value}/{scale_value}/Zwolle_{scale_value}_{filter_value}.parquet"
-        ),
-        ent_value,
-        scale_value,
-        category_value,
-        norm,
-    )
-    lwd = get_choro(
-        gpd.read_parquet(
-            f"results/filter{filter_value}/{scale_value}/Leeuwarden_{scale_value}_{filter_value}.parquet"
-        ),
-        ent_value,
-        scale_value,
-        category_value,
-        norm,
-    )
-    grn = get_choro(
-        gpd.read_parquet(
-            f"results/filter{filter_value}/{scale_value}/Groningen_{scale_value}_{filter_value}.parquet"
-        ),
-        ent_value,
-        scale_value,
-        category_value,
-        norm,
-    )
-    utr = get_choro(
-        gpd.read_parquet(
-            f"results/filter{filter_value}/{scale_value}/Utrecht_{scale_value}_{filter_value}.parquet"
-        ),
-        ent_value,
-        scale_value,
-        category_value,
-        norm,
-    )
+    if mode == "autocorrelation":
+        ams = get_choro_autocor(
+            gpd.read_parquet(
+                f"results/filter{filter_value}/{scale_value}/Amsterdam_{scale_value}_{filter_value}.parquet"
+            ),
+            ent_value,
+            scale_value,
+            category_value,
+            norm,
+        )
+        ehv = get_choro_autocor(
+            gpd.read_parquet(
+                f"results/filter{filter_value}/{scale_value}/Eindhoven_{scale_value}_{filter_value}.parquet"
+            ),
+            ent_value,
+            scale_value,
+            category_value,
+            norm,
+        )
+        rot = get_choro_autocor(
+            gpd.read_parquet(
+                f"results/filter{filter_value}/{scale_value}/Rotterdam_{scale_value}_{filter_value}.parquet"
+            ),
+            ent_value,
+            scale_value,
+            category_value,
+            norm,
+        )
+        maa = get_choro_autocor(
+            gpd.read_parquet(
+                f"results/filter{filter_value}/{scale_value}/Maastricht_{scale_value}_{filter_value}.parquet"
+            ),
+            ent_value,
+            scale_value,
+            category_value,
+            norm,
+        )
+        dhg = get_choro_autocor(
+            gpd.read_parquet(
+                f"results/filter{filter_value}/{scale_value}/'s-Gravenhage_{scale_value}_{filter_value}.parquet"
+            ),
+            ent_value,
+            scale_value,
+            category_value,
+            norm,
+        )
+        arn = get_choro_autocor(
+            gpd.read_parquet(
+                f"results/filter{filter_value}/{scale_value}/Arnhem_{scale_value}_{filter_value}.parquet"
+            ),
+            ent_value,
+            scale_value,
+            category_value,
+            norm,
+        )
+        zwl = get_choro_autocor(
+            gpd.read_parquet(
+                f"results/filter{filter_value}/{scale_value}/Zwolle_{scale_value}_{filter_value}.parquet"
+            ),
+            ent_value,
+            scale_value,
+            category_value,
+            norm,
+        )
+        lwd = get_choro_autocor(
+            gpd.read_parquet(
+                f"results/filter{filter_value}/{scale_value}/Leeuwarden_{scale_value}_{filter_value}.parquet"
+            ),
+            ent_value,
+            scale_value,
+            category_value,
+            norm,
+        )
+        grn = get_choro_autocor(
+            gpd.read_parquet(
+                f"results/filter{filter_value}/{scale_value}/Groningen_{scale_value}_{filter_value}.parquet"
+            ),
+            ent_value,
+            scale_value,
+            category_value,
+            norm,
+        )
+        utr = get_choro_autocor(
+            gpd.read_parquet(
+                f"results/filter{filter_value}/{scale_value}/Utrecht_{scale_value}_{filter_value}.parquet"
+            ),
+            ent_value,
+            scale_value,
+            category_value,
+            norm,
+        )
+
+    else:
+        ams = get_choro(
+            gpd.read_parquet(
+                f"results/filter{filter_value}/{scale_value}/Amsterdam_{scale_value}_{filter_value}.parquet"
+            ),
+            ent_value,
+            scale_value,
+            category_value,
+            norm,
+        )
+        ehv = get_choro(
+            gpd.read_parquet(
+                f"results/filter{filter_value}/{scale_value}/Eindhoven_{scale_value}_{filter_value}.parquet"
+            ),
+            ent_value,
+            scale_value,
+            category_value,
+            norm,
+        )
+        rot = get_choro(
+            gpd.read_parquet(
+                f"results/filter{filter_value}/{scale_value}/Rotterdam_{scale_value}_{filter_value}.parquet"
+            ),
+            ent_value,
+            scale_value,
+            category_value,
+            norm,
+        )
+        maa = get_choro(
+            gpd.read_parquet(
+                f"results/filter{filter_value}/{scale_value}/Maastricht_{scale_value}_{filter_value}.parquet"
+            ),
+            ent_value,
+            scale_value,
+            category_value,
+            norm,
+        )
+        dhg = get_choro(
+            gpd.read_parquet(
+                f"results/filter{filter_value}/{scale_value}/'s-Gravenhage_{scale_value}_{filter_value}.parquet"
+            ),
+            ent_value,
+            scale_value,
+            category_value,
+            norm,
+        )
+        arn = get_choro(
+            gpd.read_parquet(
+                f"results/filter{filter_value}/{scale_value}/Arnhem_{scale_value}_{filter_value}.parquet"
+            ),
+            ent_value,
+            scale_value,
+            category_value,
+            norm,
+        )
+        zwl = get_choro(
+            gpd.read_parquet(
+                f"results/filter{filter_value}/{scale_value}/Zwolle_{scale_value}_{filter_value}.parquet"
+            ),
+            ent_value,
+            scale_value,
+            category_value,
+            norm,
+        )
+        lwd = get_choro(
+            gpd.read_parquet(
+                f"results/filter{filter_value}/{scale_value}/Leeuwarden_{scale_value}_{filter_value}.parquet"
+            ),
+            ent_value,
+            scale_value,
+            category_value,
+            norm,
+        )
+        grn = get_choro(
+            gpd.read_parquet(
+                f"results/filter{filter_value}/{scale_value}/Groningen_{scale_value}_{filter_value}.parquet"
+            ),
+            ent_value,
+            scale_value,
+            category_value,
+            norm,
+        )
+        utr = get_choro(
+            gpd.read_parquet(
+                f"results/filter{filter_value}/{scale_value}/Utrecht_{scale_value}_{filter_value}.parquet"
+            ),
+            ent_value,
+            scale_value,
+            category_value,
+            norm,
+        )
 
     # save figures in a dictionary for sending to the dcc.Store
     return {
