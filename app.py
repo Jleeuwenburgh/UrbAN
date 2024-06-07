@@ -5,27 +5,30 @@ from dash_extensions.javascript import arrow_function, assign
 import dash_bootstrap_components as dbc
 
 import geopandas as gpd
-import random
 import json
 
+# load datasets
 gemeenten = gpd.read_parquet("data/gemeenten_RE.parquet")
-# cut off part of the gemeenten
-# gemeenten = gemeenten.sample(frac=0.4)
+wijken = gpd.read_parquet("data/wijken_stedent.parquet")
+
+# simplify geometry
 gemeenten["geometry"] = (
     gemeenten.to_crs(gemeenten.estimate_utm_crs()).simplify(100).to_crs(gemeenten.crs)
 )
-gemeenten_json = json.loads(gemeenten.to_json())
-
-wijken = gpd.read_parquet("data/wijken_stedent.parquet")
-# cut off wijken not in gemeenten
-wijken = wijken[wijken["gemeentenaam"].isin(gemeenten["gemeentenaam"])]
 wijken["geometry"] = (
     wijken.to_crs(wijken.estimate_utm_crs()).simplify(10).to_crs(wijken.crs)
 )
+
+# convert to json
+gemeenten_json = json.loads(gemeenten.to_json())
 wijken_json = json.loads(wijken.to_json())
+
 
 ent_max = gemeenten["L0_shannon_1"].max()
 ent_min = gemeenten["L0_shannon_1"].min()
+
+stedent_max = wijken["sted/entropy"].max()
+stedent_min = wijken["sted/entropy"].min()
 
 
 def get_info(feature=None):
@@ -37,6 +40,13 @@ def get_info(feature=None):
         html.Br(),
         "Shannon = {:.3f}".format(feature["properties"]["L0_shannon_1"]),
     ]
+
+
+# ----------- wijken colorscale ------------
+colorscale_wijken = "Virdis"
+colorbar_wijken = dl.Colorbar(
+    colorscale=colorscale_wijken, width=20, height=150, min=0, max=stedent_max
+)
 
 
 # make classes ranging from 0 to ent_max with 8 steps
@@ -65,10 +75,26 @@ colorbar = dlx.categorical_colorbar(
 )
 # colorbar = dl.Colorbar(position="bottomleft", width=300, height=30, min=0, max=ent_max)
 
+# chromalib
+chroma = "https://cdnjs.cloudflare.com/ajax/libs/chroma-js/2.4.2/chroma.min.js"  # js lib used for colors
+
+
 # Geojson rendering logic, must be JavaScript as it is executed in clientside.
 style_handle = assign(
     """function(feature, context){
-    const {classes, colorscale, style, colorProp, testprop, municipality} = context.hideout;  // get props from hideout
+    const {classes, colorscale, style, colorProp, testprop, municipality} = context.hideout;  // get props
+    const value = feature.properties[colorProp];  // get value the determines the color
+    for (let i = 0; i < classes.length; ++i) {
+        if (value > classes[i]) {
+            style.fillColor = colorscale[i];  // set the fill color according to the class
+        }
+    }
+    return style;
+}"""
+)
+style_wijk = assign(
+    """function(feature, context){
+    const {classes, colorscale, style, colorProp, testprop, municipality, vmin, vmax} = context.hideout;
     const value = feature.properties[colorProp];  // get value the determines the color
     for (let i = 0; i < classes.length; ++i) {
         if (value > classes[i]) {
@@ -80,7 +106,7 @@ style_handle = assign(
 )
 style_spotlight = assign(
     """function(feature, context){
-    const {classes, colorscale, style, colorProp, testprop, municipality} = context.hideout;  // get props from hideout
+    const {classes, colorscale, style, colorProp, testprop, municipality} = context.hideout;
     const value = feature.properties[testprop];  // get value the determines the color
     // console.log('value: ', value)
     // console.log('municipality: ', municipality)
@@ -88,7 +114,7 @@ style_spotlight = assign(
         if (value == municipality) {
             style.fillColor = 'rgba( 255, 255, 255, 0.0 )';  // set the fill color according to the class
         } else {
-            style.fillColor = 'rgba( 0, 0, 0, 1)';  // set the fill color according to the class
+            style.fillColor = 'rgba( 0, 0, 0, 0.8)';  // set the fill color according to the class
         }
     }
     return style;
@@ -96,20 +122,42 @@ style_spotlight = assign(
 )
 style_spotlight_wijk = assign(
     """function(feature, context){
-    const {classes, colorscale, style, colorProp, testprop, municipality} = context.hideout;  // get props from hideout
+    const {classes, colorscale, style, colorProp, testprop, municipality, vmin, vmax} = context.hideout;
     const value = feature.properties[testprop];  // get value the determines the color
     // console.log('value: ', value)
     // console.log('municipality: ', municipality)
+    const csc = chroma.scale('YlGn').gamma(2).domain([0, vmax]);  // chroma lib to construct colorscale
+
     for (let i = 0; i < classes.length; ++i) {
         if (value == municipality) {
             style.color = 'darkgray';  // set the fill color according to the class
+            style.fillColor = csc(feature.properties[colorProp]);
+            style.fillOpacity = 0.7;
+            style.weight = 1;
         } else {
             style.color = 'rgba( 255, 255, 255, 0)';  // set the fill color according to the class
+            style.fillColor = 'white';  // set the fill color according to the class
+            style.fillOpacity = 0;
+            style.weight = 0;
         }
     }
     return style;
 }"""
 )
+
+style_wijk_stedent = assign(
+    """function(feature, context){
+    const {colorscale, classes, style, colorProp, testprop, municipality, vmin, vmax} = context.hideout;
+    const csc = chroma.scale('YlGn').gamma(2).domain([0, vmax]);  // chroma lib to construct colorscale
+    style.color = csc(feature.properties[colorProp]);  // set the fill color according to the class
+    style.fillColor = csc(feature.properties[colorProp]);  // set the fill color according to the class
+    style.color = 'darkgrey';
+    style.fillOpacity = 0.8;
+    style.weight = 0.3;
+    return style;
+}"""
+)
+
 
 # Create geojson.
 geojson = dl.GeoJSON(
@@ -135,19 +183,21 @@ geojson = dl.GeoJSON(
 # wijken
 geojson_wijken = dl.GeoJSON(
     data=wijken_json,  # geojson data
-    style=style_handle,  # how to style each polygon
+    style=style_wijk_stedent,  # how to style each polygon
     # zoomToBounds=True,  # when true, zooms to bounds when data changes (e.g. on load)
     # zoomToBoundsOnClick=True,  # when true, zooms to bounds of feature (e.g. polygon) on click
-    # hoverStyle=arrow_function(
-    #     dict(weight=5, color="#666", dashArray="")
-    # ),  # style applied on hover
+    hoverStyle=arrow_function(
+        dict(weight=3, color="black", dashArray="")
+    ),  # style applied on hover
     hideout=dict(
-        colorscale=colorscale,
+        colorscale=colorscale_wijken,
         classes=classes,
-        style=style_wijk,
+        style=style_wijk_stedent,
         colorProp="sted/entropy",
         testprop="gemeentenaam",
         municipality="",
+        vmin=0,
+        vmax=stedent_max,
     ),
     id="geojson_wijken",
 )
@@ -160,7 +210,7 @@ info = html.Div(
     style={"position": "absolute", "bottom": "10px", "right": "10px", "zIndex": "1000"},
 )
 # Create app.
-app = Dash(prevent_initial_callbacks=True)
+app = Dash(external_scripts=[chroma], prevent_initial_callbacks=True)
 app.layout = dbc.Container(
     children=[
         dl.Map(
@@ -177,7 +227,7 @@ app.layout = dbc.Container(
                         #     name="Gemeenten",
                         #     checked=True,
                         # ),
-                        dl.BaseLayer(
+                        dl.Overlay(
                             geojson, name="gemeenten", checked=True, id="gm_layer"
                         ),
                         dl.Overlay(
@@ -200,6 +250,7 @@ app.layout = dbc.Container(
             },
         ),
         dbc.Button("Reset", color="primary", className="me-1", id="btn", value=0),
+        html.Div(id="wijk_insight", children="", style={"margin-top": "10px"}),
     ]
 )
 
@@ -209,31 +260,11 @@ def info_hover(feature):
     return get_info(feature)
 
 
-# @app.callback(
-#     Output("geojson_wijken", "hideout"),
-#     Output("geojson_wijken", "style"),
-#     Input("wk_layer", "checked"),
-#     Input("geojson_wijken", "hideout"),
-#     Input("geojson", "hideout"),
-# )
-# def wijken_focus(checked, hideout_wk, hideout_gm):
-#     if checked:
-#         print("focussing wijken")
-#         print("municipality == '': ", hideout_gm["municipality"] == "")
-#         hideout_wk["municipality"] = hideout_gm["municipality"]
-#         return hideout_wk, style_spotlight_wijk
-#     else:
-#         print("not focussing wijken")
-#         return hideout_wk, style_wijk
-
-
 @app.callback(
     Output("geojson", "hideout", allow_duplicate=True),
     Output("geojson", "style", allow_duplicate=True),
     Output("geojson_wijken", "hideout", allow_duplicate=True),
     Output("geojson_wijken", "style", allow_duplicate=True),
-    # Input("geojson", "hideout"),
-    # Input("btn", "value"),
     Input("btn", "n_clicks"),
     prevent_initial_call=True,
 )
@@ -243,7 +274,7 @@ def reset(n_clicks):
         hideout_wk = geojson_wijken.__getattribute__("hideout")
         hideout_wk["municipality"] = ""
         hideout["municipality"] = ""
-        return hideout, style_handle, hideout_wk, style_wijk
+        return hideout, style_handle, hideout_wk, style_wijk_stedent
 
 
 @app.callback(
@@ -262,6 +293,17 @@ def municipality_click(clickData):
     hideout_wk["municipality"] = hideout["municipality"]
 
     return hideout, style_spotlight, hideout_wk, style_spotlight_wijk
+
+
+@app.callback(
+    Output("wijk_insight", "children"),
+    Input("geojson_wijken", "clickData"),
+)
+def wijk_click(clickData):
+    if clickData:
+
+        return clickData["properties"]["wijknaam"]
+    return ""
 
 
 if __name__ == "__main__":
