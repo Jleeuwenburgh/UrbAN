@@ -8,13 +8,19 @@ window.dashExtensions = Object.assign({}, window.dashExtensions, {
                 colorProp,
                 testprop,
                 municipality
-            } = context.hideout; // get props from hideout
-            const value = feature.properties[colorProp]; // get value the determines the color
-            for (let i = 0; i < classes.length; ++i) {
-                if (value > classes[i]) {
-                    style.fillColor = colorscale[i]; // set the fill color according to the class
-                }
-            }
+            } = context.hideout; // get props
+            const csc = chroma.scale('YlGn').gamma(2).domain([0, 4]);
+            style.color = csc(feature.properties[colorProp]); // set the fill color according to the class
+            style.fillColor = csc(feature.properties[colorProp]); // set the fill color according to the class
+            style.color = 'black';
+            style.fillOpacity = 1;
+            style.weight = 0.5;
+            //const value = feature.properties[colorProp];  // get value the determines the color
+            //for (let i = 0; i < classes.length; ++i) {
+            //    if (value > classes[i]) {
+            //        style.fillColor = colorscale[i];  // set the fill color according to the class
+            //    }
+            //}
             return style;
         },
         function1: function(feature, context) {
@@ -27,7 +33,7 @@ window.dashExtensions = Object.assign({}, window.dashExtensions, {
                 municipality,
                 vmin,
                 vmax
-            } = context.hideout; // get props from hideout
+            } = context.hideout;
             const value = feature.properties[colorProp]; // get value the determines the color
             for (let i = 0; i < classes.length; ++i) {
                 if (value > classes[i]) {
@@ -44,7 +50,7 @@ window.dashExtensions = Object.assign({}, window.dashExtensions, {
                 colorProp,
                 testprop,
                 municipality
-            } = context.hideout; // get props from hideout
+            } = context.hideout;
             const value = feature.properties[testprop]; // get value the determines the color
             // console.log('value: ', value)
             // console.log('municipality: ', municipality)
@@ -67,7 +73,7 @@ window.dashExtensions = Object.assign({}, window.dashExtensions, {
                 municipality,
                 vmin,
                 vmax
-            } = context.hideout; // get props from hideout
+            } = context.hideout;
             const value = feature.properties[testprop]; // get value the determines the color
             // console.log('value: ', value)
             // console.log('municipality: ', municipality)
@@ -98,7 +104,7 @@ window.dashExtensions = Object.assign({}, window.dashExtensions, {
                 municipality,
                 vmin,
                 vmax
-            } = context.hideout; // get props from hideout
+            } = context.hideout;
             const csc = chroma.scale('YlGn').gamma(2).domain([0, vmax]); // chroma lib to construct colorscale
             style.color = csc(feature.properties[colorProp]); // set the fill color according to the class
             style.fillColor = csc(feature.properties[colorProp]); // set the fill color according to the class

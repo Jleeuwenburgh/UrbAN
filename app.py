@@ -1,10 +1,15 @@
+from dash import Dash, html, Output, Input, dash_table, dcc
+import dash_bootstrap_components as dbc
 import dash_leaflet as dl
 import dash_leaflet.express as dlx
-from dash import Dash, html, Output, Input
 from dash_extensions.javascript import arrow_function, assign
-import dash_bootstrap_components as dbc
+
 
 import geopandas as gpd
+import pandas as pd
+import numpy as np
+import plotly.graph_objects as go
+import plotly_express as px
 import json
 
 # load datasets
@@ -38,7 +43,7 @@ def get_info(feature=None):
     return header + [
         html.B(feature["properties"]["gemeentenaam"]),
         html.Br(),
-        "Shannon = {:.3f}".format(feature["properties"]["L0_shannon_1"]),
+        "Shannon = {:.3f}".format(feature["properties"]["L0_shannon_0"]),
     ]
 
 
@@ -50,7 +55,7 @@ colorbar_wijken = dl.Colorbar(
 
 
 # make classes ranging from 0 to ent_max with 8 steps
-classes = [ent_min + (ent_max - ent_min) / 8 * i for i in range(9)]
+classes = [0 + (4 - 0) / 8 * i for i in range(9)]
 
 colorscale = [
     "#800026",
@@ -83,12 +88,18 @@ chroma = "https://cdnjs.cloudflare.com/ajax/libs/chroma-js/2.4.2/chroma.min.js" 
 style_handle = assign(
     """function(feature, context){
     const {classes, colorscale, style, colorProp, testprop, municipality} = context.hideout;  // get props
-    const value = feature.properties[colorProp];  // get value the determines the color
-    for (let i = 0; i < classes.length; ++i) {
-        if (value > classes[i]) {
-            style.fillColor = colorscale[i];  // set the fill color according to the class
-        }
-    }
+    const csc = chroma.scale('YlGn').gamma(2).domain([0, 4]);
+    style.color = csc(feature.properties[colorProp]);  // set the fill color according to the class
+    style.fillColor = csc(feature.properties[colorProp]);  // set the fill color according to the class
+    style.color = 'black';
+    style.fillOpacity = 1;
+    style.weight = 0.5;
+    //const value = feature.properties[colorProp];  // get value the determines the color
+    //for (let i = 0; i < classes.length; ++i) {
+    //    if (value > classes[i]) {
+    //        style.fillColor = colorscale[i];  // set the fill color according to the class
+    //    }
+    //}
     return style;
 }"""
 )
@@ -172,7 +183,7 @@ geojson = dl.GeoJSON(
         colorscale=colorscale,
         classes=classes,
         style=style,
-        colorProp="L0_shannon_1",
+        colorProp="L0_shannon_0",
         testprop="gemeentenaam",
         municipality="",
     ),
@@ -210,9 +221,14 @@ info = html.Div(
     style={"position": "absolute", "bottom": "10px", "right": "10px", "zIndex": "1000"},
 )
 # Create app.
-app = Dash(external_scripts=[chroma], prevent_initial_callbacks=True)
+app = Dash(
+    external_scripts=[chroma],
+    prevent_initial_callbacks=True,
+    external_stylesheets=[dbc.themes.LUX],
+)
 app.layout = dbc.Container(
     children=[
+        html.H1("Urban Amenities Navigator"),
         dl.Map(
             children=[
                 dl.TileLayer(
@@ -227,10 +243,10 @@ app.layout = dbc.Container(
                         #     name="Gemeenten",
                         #     checked=True,
                         # ),
-                        dl.Overlay(
+                        dl.BaseLayer(
                             geojson, name="gemeenten", checked=True, id="gm_layer"
                         ),
-                        dl.Overlay(
+                        dl.BaseLayer(
                             geojson_wijken, name="wijken", checked=False, id="wk_layer"
                         ),
                     ],
@@ -247,12 +263,40 @@ app.layout = dbc.Container(
             zoom=7,
             style={
                 "height": "80vh",
+                "margin": "10px 0px",
             },
         ),
-        dbc.Button("Reset", color="primary", className="me-1", id="btn", value=0),
-        html.Div(id="wijk_insight", children="", style={"margin-top": "10px"}),
+        dbc.Container(
+            [
+                dbc.Button(
+                    "Reset", color="primary", className="me-1", id="btn", value=0
+                ),
+                dbc.RadioItems(
+                    options=[
+                        {"label": "Filter 0", "value": "0"},
+                        {"label": "Filter 1", "value": "1"},
+                        {"label": "Filter 2", "value": "2"},
+                    ],
+                    value="0",
+                    id="filter_selector",
+                    inline=True,
+                ),
+                html.Div(id="wijk_insight", children="", style={"margin-top": "10px"}),
+            ]
+        ),
     ]
 )
+
+
+@app.callback(
+    Output("geojson", "hideout", allow_duplicate=True),
+    Output("geojson", "style", allow_duplicate=True),
+    Input("filter_selector", "value"),
+)
+def update_filter(value):
+    hideout = geojson.__getattribute__("hideout")
+    hideout["colorProp"] = f"L0_shannon_{value}"
+    return hideout, style_handle
 
 
 @app.callback(Output("info", "children"), Input("geojson", "hoverData"))
@@ -301,8 +345,91 @@ def municipality_click(clickData):
 )
 def wijk_click(clickData):
     if clickData:
+        gm_naam = clickData["properties"]["gemeentenaam"]
+        wijknaam = clickData["properties"]["wijknaam"]
+        wijkcode = clickData["properties"]["wijkcode"]
+        gdf = wijken[wijken["wijkcode"] == wijkcode]
 
-        return clickData["properties"]["wijknaam"]
+        agecols = gdf.filter(regex="P_.*_JR$").columns
+        cols_gebnl = gdf.filter(regex="P_GEBNL.*").columns
+        cols_gebbl = gdf.filter(regex="P_GEBBL.*").columns
+
+        aantal_inwoners = wijken["AANT_INW"]
+
+        gdf.loc[:, agecols] = gdf.loc[:, agecols].apply(
+            lambda x: np.ceil(aantal_inwoners * x / 100)
+        )
+        gdf.loc[:, cols_gebnl] = gdf.loc[:, cols_gebnl].apply(
+            lambda x: np.ceil(aantal_inwoners * x / 100)
+        )
+        gdf.loc[:, cols_gebbl] = gdf.loc[:, cols_gebbl].apply(
+            lambda x: np.ceil(aantal_inwoners * x / 100)
+        )
+
+        # make relative bar plot of the amount of mannen en vrouwen
+        mv_bar = go.Figure()
+        mv_bar.add_trace(
+            go.Bar(
+                y=["Mannen / Vrouwen"],
+                x=gdf["AANT_MAN"],
+                name="Mannen",
+                orientation="h",
+                marker=dict(
+                    color="rgba(36, 111, 219, 0.4)",
+                    line=dict(color="rgba(36, 111, 219, 0.4)"),
+                ),
+            )
+        )
+        mv_bar.add_trace(
+            go.Bar(
+                y=["Mannen / Vrouwen"],
+                x=gdf["AANT_VROUW"],
+                name="Vrouwen",
+                orientation="h",
+                marker=dict(
+                    color="rgba(245, 40, 145, 0.4)",
+                    line=dict(color="rgba(245, 40, 145, 0.4)"),
+                ),
+            )
+        )
+        for col in agecols:
+            mv_bar.add_trace(
+                go.Bar(
+                    y=["leeftijd"],
+                    x=gdf[col],
+                    name=col,
+                    orientation="h",
+                )
+            )
+        for col in cols_gebnl:
+            mv_bar.add_trace(
+                go.Bar(
+                    y=["geboren"],
+                    x=gdf[col],
+                    name=col,
+                    orientation="h",
+                )
+            )
+        for col in cols_gebbl:
+            mv_bar.add_trace(
+                go.Bar(
+                    y=["geboren"],
+                    x=gdf[col],
+                    name=col,
+                    orientation="h",
+                )
+            )
+        mv_bar.update_layout(
+            barmode="relative",
+            # height=250,
+            xaxis_autorange=True,
+        )
+
+        return [
+            html.H3(f"{gm_naam} - {wijknaam}"),
+            dcc.Graph(figure=mv_bar),
+        ]
+
     return ""
 
 
