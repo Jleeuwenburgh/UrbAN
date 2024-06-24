@@ -13,8 +13,13 @@ import plotly_express as px
 import json
 
 # load datasets
-gemeenten = gpd.read_parquet("data/gemeenten_RE.parquet")
-wijken = gpd.read_parquet("data/wijken_stedent.parquet")
+gemeenten = gpd.read_parquet("data/gemeenten/gemeenten_stats.parquet")
+wijken = gpd.read_parquet("data/wijken/wijken_stats.parquet")
+buurten = gpd.read_parquet("data/buurten/buurten_stats.parquet")
+
+gemeenten_counts = pd.read_parquet("data/gemeenten/gemeenten_counts.parquet")
+wijken_counts = pd.read_parquet("data/wijken/wijken_counts.parquet")
+buurten_counts = pd.read_parquet("data/buurten/buurten_counts.parquet")
 
 # simplify geometry
 gemeenten["geometry"] = (
@@ -282,6 +287,14 @@ app.layout = dbc.Container(
                     inline=True,
                 ),
                 html.Div(id="wijk_insight", children="", style={"margin-top": "10px"}),
+                dbc.Offcanvas(
+                    children=[],
+                    id="offcanvas-placement",
+                    title="Placement",
+                    is_open=False,
+                    placement="end",
+                    style={"width": "70%"},
+                ),
             ]
         ),
     ]
@@ -340,7 +353,9 @@ def municipality_click(clickData):
 
 
 @app.callback(
-    Output("wijk_insight", "children"),
+    Output("offcanvas-placement", "is_open"),
+    Output("offcanvas-placement", "children"),
+    # Output("wijk_insight", "children"),
     Input("geojson_wijken", "clickData"),
 )
 def wijk_click(clickData):
@@ -349,7 +364,18 @@ def wijk_click(clickData):
         wijknaam = clickData["properties"]["wijknaam"]
         wijkcode = clickData["properties"]["wijkcode"]
         gdf = wijken[wijken["wijkcode"] == wijkcode]
+        df_counts = wijken_counts[wijken_counts["wijkcode"] == wijkcode]
 
+        ####################################################################
+        # make horizontal bar plot of the amenities present in the wijk
+        L0_counts = df_counts.filter(regex="L0_1.*").sum()
+
+        counts = L0_counts.reset_index()
+        counts.columns = ["category", "count"]
+        counts.category = counts.category.str.replace("L0_1_count_", "")
+        amenity_bar = px.bar(counts, x="count", y="category", orientation="h")
+
+        ####################################################################
         agecols = gdf.filter(regex="P_.*_JR$").columns
         cols_gebnl = gdf.filter(regex="P_GEBNL.*").columns
         cols_gebbl = gdf.filter(regex="P_GEBBL.*").columns
@@ -424,10 +450,40 @@ def wijk_click(clickData):
             # height=250,
             xaxis_autorange=True,
         )
+        ####################################################################
 
-        return [
+        return True, [
             html.H3(f"{gm_naam} - {wijknaam}"),
+            html.Img(src=f"/assets/RK.png", style={"width": "100%"}),
+            html.Hr(
+                style={
+                    "borderWidth": "0.3vh",
+                    "width": "100%",
+                    "borderColor": "#000000",
+                    "borderStyle": "solid",
+                }
+            ),
+            html.H4("Amenities"),
+            dcc.Graph(figure=amenity_bar),
+            html.Hr(
+                style={
+                    "borderWidth": "0.3vh",
+                    "width": "100%",
+                    "borderColor": "#000000",
+                    "borderStyle": "solid",
+                }
+            ),
+            html.H4("Demographics"),
             dcc.Graph(figure=mv_bar),
+            html.Hr(
+                style={
+                    "borderWidth": "0.3vh",
+                    "width": "100%",
+                    "borderColor": "#000000",
+                    "borderStyle": "solid",
+                }
+            ),
+            html.H4("Similar neighbourhoods"),
         ]
 
     return ""
