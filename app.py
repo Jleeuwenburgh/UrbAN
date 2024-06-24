@@ -454,7 +454,7 @@ def wijk_click(clickData):
 
         return True, [
             html.H3(f"{gm_naam} - {wijknaam}"),
-            html.Img(src=f"/assets/RK.png", style={"width": "100%"}),
+            # html.Img(src=f"/assets/RK.png", style={"width": "100%"}),
             html.Hr(
                 style={
                     "borderWidth": "0.3vh",
