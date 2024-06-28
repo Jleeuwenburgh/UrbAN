@@ -7,9 +7,10 @@ window.dashExtensions = Object.assign({}, window.dashExtensions, {
                 style,
                 colorProp,
                 testprop,
-                municipality
+                municipality,
+                vmax
             } = context.hideout; // get props
-            const csc = chroma.scale('YlGn').gamma(2).domain([0, 4]);
+            const csc = chroma.scale('YlGn').gamma(2).domain([0, vmax]); // chroma lib to construct colorscale
             style.color = csc(feature.properties[colorProp]); // set the fill color according to the class
             style.fillColor = csc(feature.properties[colorProp]); // set the fill color according to the class
             style.color = 'black';

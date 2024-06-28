@@ -4,17 +4,18 @@ import dash_leaflet as dl
 import dash_leaflet.express as dlx
 from dash_extensions.javascript import arrow_function, assign
 
-
 import geopandas as gpd
 import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
 import plotly_express as px
+
 import json
+
 
 # load datasets
 gemeenten = gpd.read_parquet("data/gemeenten/gemeenten_stats.parquet")
-wijken = gpd.read_parquet("data/wijken/wijken_stats.parquet")
+wijken = gpd.read_parquet("data/wijken/wijken_stats_lisa.parquet")
 buurten = gpd.read_parquet("data/buurten/buurten_stats.parquet")
 
 gemeenten_counts = pd.read_parquet("data/gemeenten/gemeenten_counts.parquet")
@@ -41,14 +42,25 @@ stedent_max = wijken["sted/entropy"].max()
 stedent_min = wijken["sted/entropy"].min()
 
 
-def get_info(feature=None):
-    header = [html.H4("Shannon entropy of municipalities")]
+def get_info(feature=None, hideout=None):
+    if hideout:
+        ent_measure = hideout["colorProp"].split("_")[1]
+
+        if hideout["colorProp"].split("_")[-1] == "norm":
+            infostr = f"Normalised {ent_measure}"
+        else:
+            infostr = f"Transformed {ent_measure}"
+    else:
+        ent_measure = ""
+        infostr = ""
+
+    header = [html.H4(f"{ent_measure} entropy of municipalities")]
     if not feature:
         return header + [html.P("Hover over a municipality")]
     return header + [
         html.B(feature["properties"]["gemeentenaam"]),
         html.Br(),
-        "Shannon = {:.3f}".format(feature["properties"]["L0_shannon_0"]),
+        f"{infostr} = {feature['properties'][hideout['colorProp']]:.2f}",
     ]
 
 
@@ -73,6 +85,7 @@ colorscale = [
     "#FFEDA0",
 ]
 
+
 # style = dict(weight=2, opacity=1, color="white", dashArray="3", fillOpacity=0.7)
 style = dict(weight=1, opacity=1, color="gray", fillOpacity=1)
 style_wijk = dict(weight=2, opacity=1, color="darkgray", fillOpacity=0)
@@ -92,8 +105,8 @@ chroma = "https://cdnjs.cloudflare.com/ajax/libs/chroma-js/2.4.2/chroma.min.js" 
 # Geojson rendering logic, must be JavaScript as it is executed in clientside.
 style_handle = assign(
     """function(feature, context){
-    const {classes, colorscale, style, colorProp, testprop, municipality} = context.hideout;  // get props
-    const csc = chroma.scale('YlGn').gamma(2).domain([0, 4]);
+    const {classes, colorscale, style, colorProp, testprop, municipality, vmax} = context.hideout;  // get props
+    const csc = chroma.scale('YlGn').gamma(2).domain([0, vmax]);  // chroma lib to construct colorscale
     style.color = csc(feature.properties[colorProp]);  // set the fill color according to the class
     style.fillColor = csc(feature.properties[colorProp]);  // set the fill color according to the class
     style.color = 'black';
@@ -188,9 +201,10 @@ geojson = dl.GeoJSON(
         colorscale=colorscale,
         classes=classes,
         style=style,
-        colorProp="L0_shannon_0",
+        colorProp="L0_altieri_1_T",
         testprop="gemeentenaam",
         municipality="",
+        vmax=10,
     ),
     # clickData="Hello!",
     id="geojson",
@@ -209,7 +223,7 @@ geojson_wijken = dl.GeoJSON(
         colorscale=colorscale_wijken,
         classes=classes,
         style=style_wijk_stedent,
-        colorProp="sted/entropy",
+        colorProp="L0_altieri_1_T",
         testprop="gemeentenaam",
         municipality="",
         vmin=0,
@@ -233,9 +247,22 @@ app = Dash(
 )
 app.layout = dbc.Container(
     children=[
-        html.H1("Urban Amenities Navigator"),
+        html.H1(
+            "Urban Amenities Navigator",
+            className="text-center",
+            style={"padding-top": "1rem"},
+        ),
         dl.Map(
             children=[
+                dl.Colorbar(
+                    colorscale="YlGn",
+                    width=30,
+                    height=350,
+                    min=0,
+                    max=10,
+                    id="cb",
+                    position="bottomleft",
+                ),
                 dl.TileLayer(
                     url="https://api.maptiler.com/maps/dataviz/{z}/{x}/{y}.png?key=xpqbUuTHIbezz932Aghp"
                 ),
@@ -261,20 +288,43 @@ app.layout = dbc.Container(
                 #     url="https://api.maptiler.com/maps/dataviz/{z}/{x}/{y}.png?key=xpqbUuTHIbezz932Aghp"
                 # ),
                 # geojson
-                colorbar,
+                # colorbar,
                 info,
             ],
             center=[52.2129919, 5.2793703],
             zoom=7,
             style={
-                "height": "80vh",
+                "height": "70vh",
                 "margin": "10px 0px",
+                "border": "1px solid black",
             },
         ),
         dbc.Container(
             [
+                html.H3("Controls"),
                 dbc.Button(
                     "Reset", color="primary", className="me-1", id="btn", value=0
+                ),
+                dbc.RadioItems(
+                    options=[
+                        {"label": "Shannon", "value": "shannon"},
+                        {"label": "Altieri", "value": "altieri"},
+                        {"label": "Leibovici", "value": "leibovici"},
+                    ],
+                    value="altieri",
+                    id="entropy_selector",
+                    inline=True,
+                    style={"padding": "10px 5px 10px 5px"},
+                ),
+                dbc.RadioItems(
+                    options=[
+                        {"label": "Level 0", "value": "0"},
+                        {"label": "Level 1", "value": "1"},
+                    ],
+                    value="0",
+                    id="category_selector",
+                    inline=True,
+                    style={"padding": "10px 5px 10px 5px"},
                 ),
                 dbc.RadioItems(
                     options=[
@@ -282,15 +332,26 @@ app.layout = dbc.Container(
                         {"label": "Filter 1", "value": "1"},
                         {"label": "Filter 2", "value": "2"},
                     ],
-                    value="0",
+                    value="1",
                     id="filter_selector",
                     inline=True,
+                    style={"padding": "10px 5px 10px 5px"},
+                ),
+                dbc.RadioItems(
+                    options=[
+                        {"label": "Transformed", "value": "_T"},
+                        {"label": "Normalised", "value": "_norm"},
+                    ],
+                    value="_T",
+                    id="norm_selector",
+                    inline=True,
+                    style={"padding": "10px 5px 10px 5px"},
                 ),
                 html.Div(id="wijk_insight", children="", style={"margin-top": "10px"}),
                 dbc.Offcanvas(
                     children=[],
                     id="offcanvas-placement",
-                    title="Placement",
+                    title="Insights",
                     is_open=False,
                     placement="end",
                     style={"width": "70%"},
@@ -304,17 +365,46 @@ app.layout = dbc.Container(
 @app.callback(
     Output("geojson", "hideout", allow_duplicate=True),
     Output("geojson", "style", allow_duplicate=True),
+    Output("cb", "max"),
+    Output("geojson_wijken", "hideout", allow_duplicate=True),
+    Output("geojson_wijken", "style", allow_duplicate=True),
+    Input("category_selector", "value"),
+    Input("entropy_selector", "value"),
     Input("filter_selector", "value"),
+    Input("norm_selector", "value"),
 )
-def update_filter(value):
+def update_filter(cat_value, entropy_value, filter_value, normalize):
     hideout = geojson.__getattribute__("hideout")
-    hideout["colorProp"] = f"L0_shannon_{value}"
-    return hideout, style_handle
+    hideout["colorProp"] = f"L{cat_value}_{entropy_value}_{filter_value}{normalize}"
+    if normalize == "_norm":
+        hideout["vmax"] = 1
+        cbmax = 1
+    else:
+        hideout["vmax"] = 10
+        cbmax = 10
+
+    hideout_wk = geojson_wijken.__getattribute__("hideout")
+    hideout_wk["colorProp"] = f"L{cat_value}_{entropy_value}_{filter_value}{normalize}"
+    if normalize == "_norm":
+        hideout_wk["vmax"] = 1
+    else:
+        hideout_wk["vmax"] = 10
+
+    return hideout, style_handle, cbmax, hideout_wk, style_wijk_stedent
 
 
-@app.callback(Output("info", "children"), Input("geojson", "hoverData"))
-def info_hover(feature):
-    return get_info(feature)
+@app.callback(
+    Output("info", "children"),
+    Input("geojson", "hoverData"),
+    Input("geojson_wijken", "hoverData"),
+)
+def info_hover(feature, feature_wijken):
+    if feature_wijken:
+        feature = feature_wijken
+        hideout = geojson_wijken.__getattribute__("hideout")
+    else:
+        hideout = geojson.__getattribute__("hideout")
+    return get_info(feature, hideout)
 
 
 @app.callback(
@@ -396,9 +486,9 @@ def wijk_click(clickData):
         mv_bar = go.Figure()
         mv_bar.add_trace(
             go.Bar(
-                y=["Mannen / Vrouwen"],
+                y=["Gender"],
                 x=gdf["AANT_MAN"],
-                name="Mannen",
+                name="Male",
                 orientation="h",
                 marker=dict(
                     color="rgba(36, 111, 219, 0.4)",
@@ -408,9 +498,9 @@ def wijk_click(clickData):
         )
         mv_bar.add_trace(
             go.Bar(
-                y=["Mannen / Vrouwen"],
+                y=["Gender"],
                 x=gdf["AANT_VROUW"],
-                name="Vrouwen",
+                name="Female",
                 orientation="h",
                 marker=dict(
                     color="rgba(245, 40, 145, 0.4)",
@@ -418,30 +508,37 @@ def wijk_click(clickData):
                 ),
             )
         )
-        for col in agecols:
+        names = ["0-14", "15-24", "25-44", "45-64", "65+"]
+        for col, name_ in zip(agecols, names):
             mv_bar.add_trace(
                 go.Bar(
-                    y=["leeftijd"],
+                    y=["Age"],
                     x=gdf[col],
-                    name=col,
+                    name=name_ + " years",
                     orientation="h",
                 )
             )
-        for col in cols_gebnl:
+        names = [
+            "NL born, NL heritage",
+            "NL born, EU heritage",
+            "NL born, non-EU heritage",
+        ]
+        for col, name_ in zip(cols_gebnl, names):
             mv_bar.add_trace(
                 go.Bar(
-                    y=["geboren"],
+                    y=["Birth and heritage"],
                     x=gdf[col],
-                    name=col,
+                    name=name_,
                     orientation="h",
                 )
             )
-        for col in cols_gebbl:
+        names = ["Foreign born, EU heritage", "Foreign born, non-EU heritage"]
+        for col, name_ in zip(cols_gebbl, names):
             mv_bar.add_trace(
                 go.Bar(
-                    y=["geboren"],
+                    y=["Birth and heritage"],
                     x=gdf[col],
-                    name=col,
+                    name=name_,
                     orientation="h",
                 )
             )
@@ -452,9 +549,38 @@ def wijk_click(clickData):
         )
         ####################################################################
 
+        featurelist = [
+            "L0_altieri_1_T_norm",
+            "L0_altieri_1_T_Is_norm",
+            "L1_altieri_1_T_norm",
+            "L1_altieri_1_T_Is_norm",
+        ]
+        distcopy = wijken.copy()
+        sample = distcopy[distcopy["wijkcode"] == wijkcode]
+
+        # calculate the distance between the sample and all other wijken, don't use the index
+        distcopy["distance"] = np.linalg.norm(
+            distcopy[featurelist] - sample[featurelist].values[0], axis=1
+        )
+
+        # sort by distance ascending
+        similarities = distcopy.sort_values("distance").reset_index(drop=True)
+
+        similarities = similarities[["gemeentenaam", "wijknaam"]].head(6)
+        # leave the sample out
+        similarities = similarities[similarities["wijknaam"] != wijknaam]
+        # rename gemeentenaam, wijknaam to municipality, district
+        similarities = similarities.rename(
+            columns={"gemeentenaam": "Municipality", "wijknaam": "District"}
+        )
+
+        ####################################################################
+
         return True, [
             html.H3(f"{gm_naam} - {wijknaam}"),
-            # html.Img(src=f"/assets/RK.png", style={"width": "100%"}),
+            html.Img(
+                src=f"/assets/amenity_plots/wijken/WK077271.png", style={"width": "80%"}
+            ),
             html.Hr(
                 style={
                     "borderWidth": "0.3vh",
@@ -484,10 +610,12 @@ def wijk_click(clickData):
                 }
             ),
             html.H4("Similar neighbourhoods"),
+            # table with similar neighbourhoods
+            dash_table.DataTable(similarities.to_dict("records")),
         ]
 
     return ""
 
 
 if __name__ == "__main__":
-    app.run_server(debug=True)
+    app.run_server(debug=False)
